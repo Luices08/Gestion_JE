@@ -1,0 +1,172 @@
+<%- include('../partials/header') %>
+<% 
+  const currentPage = 'aprendices';
+  const fichaFormAction = '/aprendices';
+%>
+<%- include('../partials/nav') %>
+
+<!-- ── Page header ──────────────────────────────────────────── -->
+<div class="page-header">
+  <h1 class="page-header__title">Aprendices</h1>
+  <p class="page-header__sub">
+    <% if (typeof fichaActiva !== 'undefined' && fichaActiva && fichas.length) {
+      const f = fichas.find(f => f.id_ficha == fichaActiva);
+      if (f) { %>
+        <%= f.numero_ficha %> — <%= f.denominacion %>
+    <% } } %>
+  </p>
+</div>
+
+<% if (typeof error !== 'undefined' && error) { %>
+  <div class="alert alert--error">
+    <div class="alert__title">Error</div>
+    <%= error %>
+  </div>
+<% } %>
+
+<!-- ── Filtros ───────────────────────────────────────────────── -->
+<form class="filters" method="GET" action="/aprendices">
+  <input type="hidden" name="ficha" value="<%= fichaActiva || '' %>" />
+
+  <div class="filters__group">
+    <label class="form-label" for="f-buscar">Buscar</label>
+    <input
+      class="form-control"
+      type="text"
+      id="f-buscar"
+      name="buscar"
+      placeholder="Nombre o número de documento…"
+      value="<%= filtros.buscar %>"
+    />
+  </div>
+
+  <div class="filters__group" style="max-width:180px">
+    <label class="form-label" for="f-estado">Estado</label>
+    <select class="form-control" id="f-estado" name="estado">
+      <option value="">Todos</option>
+      <option value="EN FORMACION"      <%= filtros.estado === 'EN FORMACION'      ? 'selected' : '' %>>En formación</option>
+      <option value="RETIRO VOLUNTARIO" <%= filtros.estado === 'RETIRO VOLUNTARIO' ? 'selected' : '' %>>Retiro voluntario</option>
+      <option value="TRASLADADO"        <%= filtros.estado === 'TRASLADADO'        ? 'selected' : '' %>>Trasladado</option>
+      <option value="DESERTADO"         <%= filtros.estado === 'DESERTADO'         ? 'selected' : '' %>>Desertado</option>
+    </select>
+  </div>
+
+  <div class="filters__group" style="max-width:260px">
+    <label class="form-label" for="f-competencia">Competencia</label>
+    <select class="form-control" id="f-competencia" name="competencia">
+      <option value="">Todas</option>
+      <% competencias.forEach(c => { %>
+        <option value="<%= c.id_competencia %>" <%= filtros.competencia == c.id_competencia ? 'selected' : '' %>>
+          <%= c.codigo_competencia %> — <%= c.competencia.length > 40 ? c.competencia.substring(0,40)+'…' : c.competencia %>
+        </option>
+      <% }) %>
+    </select>
+  </div>
+
+  <div class="filters__actions">
+    <button type="submit" class="btn btn--primary">Filtrar</button>
+    <a href="/aprendices<%= fichaActiva ? '?ficha=' + fichaActiva : '' %>" class="btn btn--ghost">Limpiar</a>
+  </div>
+</form>
+
+<!-- ── Tabla de aprendices ───────────────────────────────────── -->
+<div class="section">
+  <div class="section__header">
+    <h2 class="section__title">Resultados</h2>
+    <span class="section__count"><%= aprendices.length %> aprendice<%= aprendices.length !== 1 ? 's' : '' %></span>
+  </div>
+
+  <% if (aprendices.length === 0) { %>
+    <div class="card">
+      <div class="empty-state">
+        <span class="empty-state__icon">◎</span>
+        <h3 class="empty-state__title">Sin resultados</h3>
+        <p class="empty-state__msg">
+          No se encontraron aprendices con los filtros aplicados.
+        </p>
+        <a href="/aprendices<%= fichaActiva ? '?ficha=' + fichaActiva : '' %>" class="btn btn--ghost">
+          Limpiar filtros
+        </a>
+      </div>
+    </div>
+  <% } else { %>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Documento</th>
+          <th>Aprendiz</th>
+          <th>Estado</th>
+          <th style="min-width:160px">Avance</th>
+          <th class="text-right">Aprobados</th>
+          <th class="text-right">No aprobados</th>
+          <th class="text-right">Por evaluar</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <%
+          const estadoMap = {
+            'EN FORMACION':     'badge--formacion',
+            'RETIRO VOLUNTARIO':'badge--retiro',
+            'TRASLADADO':       'badge--trasladado',
+            'DESERTADO':        'badge--desertado',
+          };
+          const estadoLabel = {
+            'EN FORMACION':     'En formación',
+            'RETIRO VOLUNTARIO':'Retiro',
+            'TRASLADADO':       'Trasladado',
+            'DESERTADO':        'Desertado',
+          };
+        %>
+        <% aprendices.forEach(a => {
+          const pct = a.pct_avance || 0;
+          const fillClass = pct >= 75 ? '' : pct >= 40 ? 'progress-bar__fill--warn' : 'progress-bar__fill--danger';
+        %>
+        <tr>
+          <td class="td-mono">
+            <%= a.tipo_documento %> <%= a.numero_documento %>
+          </td>
+          <td>
+            <span class="fw-600"><%= a.nombre_completo %></span>
+          </td>
+          <td>
+            <span class="badge <%= estadoMap[a.estado] || '' %>">
+              <%= estadoLabel[a.estado] || a.estado %>
+            </span>
+          </td>
+          <td>
+            <div class="progress-wrap">
+              <div class="progress-bar">
+                <div class="progress-bar__fill <%= fillClass %>" style="width:<%= pct %>%"></div>
+              </div>
+              <span class="progress-pct"><%= pct %>%</span>
+            </div>
+          </td>
+          <td class="text-right td-mono"><%= a.aprobados || 0 %></td>
+          <td class="text-right">
+            <% if ((a.no_aprobados || 0) > 0) { %>
+              <span class="badge badge--no-aprobado"><%= a.no_aprobados %></span>
+            <% } else { %>
+              <span class="text-muted text-xs">—</span>
+            <% } %>
+          </td>
+          <td class="text-right">
+            <% if ((a.por_evaluar || 0) > 0) { %>
+              <span class="badge badge--por-evaluar"><%= a.por_evaluar %></span>
+            <% } else { %>
+              <span class="text-muted text-xs">—</span>
+            <% } %>
+          </td>
+          <td class="text-right">
+            <a href="/aprendices/<%= a.id_aprendiz %>" class="btn btn--ghost btn--sm">Ver →</a>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+  <% } %>
+</div>
+
+<%- include('../partials/footer') %>

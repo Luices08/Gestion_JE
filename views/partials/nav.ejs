@@ -1,0 +1,173 @@
+<nav class="nav">
+  <div class="nav__inner">
+
+    <a href="/" class="nav__brand">
+      <span class="nav__brand-icon">◈</span>
+      <span class="nav__brand-name">Juicios<strong>SENA</strong></span>
+    </a>
+
+    <!-- Selector de ficha (combobox) -->
+    <% if (typeof fichas !== 'undefined' && fichas.length) { %>
+    <form class="nav__ficha-form" id="nav-ficha-form" method="GET" action="<%= typeof fichaFormAction !== 'undefined' ? fichaFormAction : '/' %>">
+      <input type="hidden" id="nav-ficha-hidden" name="ficha" value="<%= typeof fichaActiva !== 'undefined' ? fichaActiva : '' %>">
+      <label class="nav__ficha-label" for="nav-ficha-search">Ficha</label>
+      <div class="nav__ficha-combo" id="nav-ficha-combo">
+        <span class="nav__ficha-combo-icon">⊞</span>
+        <input
+          type="text"
+          class="nav__ficha-combo-input"
+          id="nav-ficha-search"
+          autocomplete="off"
+          placeholder="Buscar ficha…"
+          value="<% if (typeof fichaActiva !== 'undefined') {
+            const af = fichas.find(f => f.id_ficha == fichaActiva);
+            if (af) { %><%= af.numero_ficha %> — <%= af.denominacion.length > 32 ? af.denominacion.substring(0, 32) + '…' : af.denominacion %><% } } %>"
+        >
+        <span class="nav__ficha-combo-arrow" aria-hidden="true">▾</span>
+        <ul class="nav__ficha-dropdown" id="nav-ficha-dropdown" role="listbox">
+          <% fichas.forEach(f => {
+            const label = f.numero_ficha + ' — ' + (f.denominacion.length > 40 ? f.denominacion.substring(0, 40) + '…' : f.denominacion);
+          %>
+          <li class="nav__ficha-option <%= (typeof fichaActiva !== 'undefined' && fichaActiva == f.id_ficha) ? 'nav__ficha-option--active' : '' %>"
+              role="option"
+              data-value="<%= f.id_ficha %>"
+              data-label="<%= label %>">
+            <span class="nav__ficha-option-num"><%= f.numero_ficha %></span>
+            <span class="nav__ficha-option-name"><%= f.denominacion.length > 40 ? f.denominacion.substring(0, 40) + '…' : f.denominacion %></span>
+          </li>
+          <% }) %>
+        </ul>
+      </div>
+    </form>
+    <% } %>
+
+    <!-- Links de navegación -->
+    <ul class="nav__links">
+      <li>
+        <a href="/" class="nav__link <%= typeof currentPage !== 'undefined' && currentPage === 'dashboard' ? 'nav__link--active' : '' %>">
+          <span class="nav__link-icon">▦</span> Dashboard
+        </a>
+      </li>
+      <li>
+        <a href="/aprendices" class="nav__link <%= typeof currentPage !== 'undefined' && currentPage === 'aprendices' ? 'nav__link--active' : '' %>">
+          <span class="nav__link-icon">◎</span> Aprendices
+        </a>
+      </li>
+      <li>
+        <a href="/importar" class="nav__link <%= typeof currentPage !== 'undefined' && currentPage === 'importar' ? 'nav__link--active' : '' %>">
+          <span class="nav__link-icon">⊕</span> Importar
+        </a>
+      </li>
+    </ul>
+
+  </div>
+</nav>
+
+<main class="main">
+
+<script>
+(function () {
+  const combo   = document.getElementById('nav-ficha-combo');
+  if (!combo) return;
+
+  const input   = document.getElementById('nav-ficha-search');
+  const hidden  = document.getElementById('nav-ficha-hidden');
+  const form    = document.getElementById('nav-ficha-form');
+  const dropdown = document.getElementById('nav-ficha-dropdown');
+  const options  = Array.from(dropdown.querySelectorAll('.nav__ficha-option'));
+
+  let focusedIdx = -1;
+
+  /* ── helpers ──────────────────────────────────────────── */
+  function openDropdown() {
+    combo.classList.add('is-open');
+    filterOptions('');
+    scrollToActive();
+  }
+
+  function closeDropdown() {
+    combo.classList.remove('is-open');
+    focusedIdx = -1;
+    options.forEach(o => o.classList.remove('is-focused'));
+  }
+
+  function filterOptions(q) {
+    const term = q.toLowerCase().trim();
+    focusedIdx = -1;
+    options.forEach(o => {
+      const text = (o.dataset.label || '').toLowerCase();
+      o.classList.toggle('is-hidden', term !== '' && !text.includes(term));
+      o.classList.remove('is-focused');
+    });
+  }
+
+  function visible() {
+    return options.filter(o => !o.classList.contains('is-hidden'));
+  }
+
+  function scrollToActive() {
+    const active = dropdown.querySelector('.nav__ficha-option--active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  function selectOption(opt) {
+    hidden.value = opt.dataset.value;
+    input.value  = opt.dataset.label;
+    closeDropdown();
+    form.submit();
+  }
+
+  function moveFocus(dir) {
+    const vis = visible();
+    if (!vis.length) return;
+    options.forEach(o => o.classList.remove('is-focused'));
+    focusedIdx = Math.max(0, Math.min(vis.length - 1, focusedIdx + dir));
+    vis[focusedIdx].classList.add('is-focused');
+    vis[focusedIdx].scrollIntoView({ block: 'nearest' });
+  }
+
+  /* ── events ───────────────────────────────────────────── */
+  combo.addEventListener('click', function (e) {
+    if (combo.classList.contains('is-open')) {
+      if (e.target === input) return; // keep open while typing
+      closeDropdown();
+    } else {
+      openDropdown();
+      input.focus();
+      input.select();
+    }
+  });
+
+  input.addEventListener('input', function () {
+    if (!combo.classList.contains('is-open')) openDropdown();
+    filterOptions(this.value);
+  });
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown')  { e.preventDefault(); moveFocus(+1); }
+    if (e.key === 'ArrowUp')    { e.preventDefault(); moveFocus(-1); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const vis = visible();
+      if (focusedIdx >= 0 && vis[focusedIdx]) selectOption(vis[focusedIdx]);
+    }
+    if (e.key === 'Escape') closeDropdown();
+  });
+
+  options.forEach(opt => {
+    opt.addEventListener('click', function (e) {
+      e.stopPropagation();
+      selectOption(opt);
+    });
+    opt.addEventListener('mouseenter', function () {
+      options.forEach(o => o.classList.remove('is-focused'));
+      focusedIdx = visible().indexOf(opt);
+      opt.classList.add('is-focused');
+    });
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!combo.contains(e.target)) closeDropdown();
+  });
+})();
+</script>

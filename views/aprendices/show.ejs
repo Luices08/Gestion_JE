@@ -1,0 +1,161 @@
+<%- include('../partials/header') %>
+<% 
+  const currentPage = 'aprendices';
+  const fichaFormAction = '/aprendices';
+%>
+<%- include('../partials/nav') %>
+
+<!-- ── Header del aprendiz ──────────────────────────────────── -->
+<%
+  const estadoMap = {
+    'EN FORMACION':     'badge--formacion',
+    'RETIRO VOLUNTARIO':'badge--retiro',
+    'TRASLADADO':       'badge--trasladado',
+    'DESERTADO':        'badge--desertado',
+  };
+  const estadoLabel = {
+    'EN FORMACION':     'En formación',
+    'RETIRO VOLUNTARIO':'Retiro voluntario',
+    'TRASLADADO':       'Trasladado',
+    'DESERTADO':        'Desertado',
+  };
+  const pct = aprendiz.pct_avance || 0;
+%>
+
+<div class="aprendiz-header">
+  <div class="aprendiz-header__name"><%= aprendiz.nombres %> <%= aprendiz.apellidos %></div>
+  <div class="aprendiz-header__meta">
+    <%= aprendiz.tipo_documento %> <%= aprendiz.numero_documento %>
+    &nbsp;·&nbsp;
+    Ficha <%= aprendiz.numero_ficha %>
+    &nbsp;·&nbsp;
+    <%= aprendiz.denominacion %>
+  </div>
+
+  <div class="aprendiz-header__row">
+    <span class="badge <%= estadoMap[aprendiz.estado] || '' %>">
+      <%= estadoLabel[aprendiz.estado] || aprendiz.estado %>
+    </span>
+
+    <div class="progress-wrap" style="flex:1; min-width:200px">
+      <div class="progress-bar">
+        <div class="progress-bar__fill" style="width:<%= pct %>%"></div>
+      </div>
+      <span class="progress-pct"><%= pct %>% aprobado</span>
+    </div>
+
+    <span class="td-mono" style="color:rgba(255,255,255,.55); font-size:.8rem;">
+      <%= aprendiz.total_aprobados %> / <%= aprendiz.total_juicios %> juicios
+    </span>
+  </div>
+</div>
+
+<!-- ── Botón volver ──────────────────────────────────────────── -->
+<div class="flex gap-2 items-center mb-6">
+  <a href="/aprendices<%= fichaActiva ? '?ficha=' + fichaActiva : '' %>" class="btn btn--ghost btn--sm">
+    ← Volver a la lista
+  </a>
+  <span class="text-muted text-xs">
+    <%= aprendiz.juiciosPorCompetencia.length %> competencia<%= aprendiz.juiciosPorCompetencia.length !== 1 ? 's' : '' %>
+    &nbsp;·&nbsp;
+    <%= aprendiz.total_juicios %> resultados de aprendizaje
+  </span>
+</div>
+
+<!-- ── Competencias y resultados ─────────────────────────────── -->
+<% if (aprendiz.juiciosPorCompetencia.length === 0) { %>
+  <div class="card">
+    <div class="empty-state">
+      <span class="empty-state__icon">▦</span>
+      <h3 class="empty-state__title">Sin juicios registrados</h3>
+      <p class="empty-state__msg">Este aprendiz aún no tiene juicios evaluativos importados.</p>
+    </div>
+  </div>
+<% } else { %>
+  <% aprendiz.juiciosPorCompetencia.forEach(comp => {
+    const pctComp = comp.total ? Math.round((comp.aprobados / comp.total) * 1000) / 10 : 0;
+    const fillClass = pctComp >= 75 ? '' : pctComp >= 40 ? 'progress-bar__fill--warn' : 'progress-bar__fill--danger';
+  %>
+  <div class="comp-card">
+
+    <!-- Header de la competencia -->
+    <div class="comp-card__header">
+      <div>
+        <div class="comp-card__name"><%= comp.competencia %></div>
+      </div>
+      <span class="comp-card__code"><%= comp.codigo_competencia %></span>
+      <div class="progress-wrap" style="min-width:180px; max-width:220px">
+        <div class="progress-bar">
+          <div class="progress-bar__fill <%= fillClass %>" style="width:<%= pctComp %>%"></div>
+        </div>
+        <span class="progress-pct"><%= pctComp %>%</span>
+      </div>
+      <span class="text-muted text-xs" style="white-space:nowrap">
+        <%= comp.aprobados %> / <%= comp.total %>
+      </span>
+    </div>
+
+    <!-- Tabla de resultados de aprendizaje -->
+    <table>
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Resultado de aprendizaje</th>
+          <th>Juicio</th>
+          <th>Fecha y hora</th>
+          <th>Funcionario</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% comp.resultados.forEach(ra => { %>
+        <tr>
+          <td class="td-mono" style="white-space:nowrap"><%= ra.codigo_resultado %></td>
+          <td style="max-width:420px">
+            <span title="<%= ra.resultado %>">
+              <%= ra.resultado.length > 90 ? ra.resultado.substring(0,90) + '…' : ra.resultado %>
+            </span>
+          </td>
+          <td>
+            <%
+              const juicioClass = {
+                'APROBADO':     'badge--aprobado',
+                'NO APROBADO':  'badge--no-aprobado',
+                'POR EVALUAR':  'badge--por-evaluar',
+              };
+              const juicioLabel = {
+                'APROBADO':    'Aprobado',
+                'NO APROBADO': 'No aprobado',
+                'POR EVALUAR': 'Por evaluar',
+              };
+            %>
+            <span class="badge <%= juicioClass[ra.juicio] || '' %>">
+              <%= juicioLabel[ra.juicio] || ra.juicio %>
+            </span>
+          </td>
+          <td class="td-mono" style="white-space:nowrap">
+            <% if (ra.fecha_hora) { %>
+              <%= new Date(ra.fecha_hora).toLocaleDateString('es-CO', {
+                day: '2-digit', month: '2-digit', year: 'numeric'
+              }) %>
+              <span class="text-muted">
+                <%= new Date(ra.fecha_hora).toLocaleTimeString('es-CO', {
+                  hour: '2-digit', minute: '2-digit'
+                }) %>
+              </span>
+            <% } else { %>
+              <span class="text-muted">—</span>
+            <% } %>
+          </td>
+          <td class="text-sm">
+            <%= ra.funcionario || '<span class="text-muted">—</span>' %>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+
+  </div>
+  <% }) %>
+<% } %>
+
+<%- include('../partials/footer') %>

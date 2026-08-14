@@ -1,0 +1,245 @@
+<%- include('../partials/header') %>
+<% 
+  const currentPage = 'dashboard';
+  const fichaFormAction = '/';
+%>
+<%- include('../partials/nav') %>
+
+<!-- ── Page header ──────────────────────────────────────────── -->
+<div class="page-header">
+  <h1 class="page-header__title">Dashboard</h1>
+  <% if (resumen) { %>
+    <p class="page-header__sub">
+      <%= resumen.numero_ficha %> — <%= resumen.denominacion %>
+      <% if (resumen.ultima_importacion) { %>
+        · Actualizado <%= new Date(resumen.ultima_importacion).toLocaleDateString('es-CO', { day:'2-digit', month:'short', year:'numeric' }) %>
+      <% } %>
+    </p>
+  <% } %>
+</div>
+
+<% if (typeof error !== 'undefined' && error) { %>
+  <div class="alert alert--error">
+    <div class="alert__title">Error</div>
+    <%= error %>
+  </div>
+<% } %>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<%  if (!resumen) { %>
+<!-- Estado vacío: sin fichas cargadas -->
+<!-- ══════════════════════════════════════════════════════════ -->
+
+<div class="card">
+  <div class="empty-state">
+    <span class="empty-state__icon">⊕</span>
+    <h2 class="empty-state__title">No hay fichas cargadas</h2>
+    <p class="empty-state__msg">
+      Para comenzar, importa el reporte de juicios evaluativos exportado desde Sofia Plus.
+      El sistema procesará automáticamente los aprendices, competencias y resultados de aprendizaje.
+    </p>
+    <a href="/importar" class="btn btn--accent">Importar primer reporte</a>
+  </div>
+</div>
+
+<% } else { %>
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- Con datos -->
+<!-- ══════════════════════════════════════════════════════════ -->
+
+<!-- ── Stat cards ────────────────────────────────────────────── -->
+<div class="stats-grid">
+
+  <div class="stat-card">
+    <div class="stat-card__label">Total aprendices</div>
+    <div class="stat-card__value"><%= resumen.total_aprendices || 0 %></div>
+    <div class="stat-card__sub">En la ficha activa</div>
+  </div>
+
+  <div class="stat-card stat-card--accent">
+    <div class="stat-card__label">En formación</div>
+    <div class="stat-card__value"><%= resumen.en_formacion || 0 %></div>
+    <div class="stat-card__sub">
+      <% const otros = (resumen.retirados||0) + (resumen.trasladados||0) + (resumen.desertados||0); %>
+      <%= otros %> con novedad
+    </div>
+  </div>
+
+  <div class="stat-card stat-card--accent">
+    <div class="stat-card__label">Juicios aprobados</div>
+    <div class="stat-card__value"><%= resumen.aprobados || 0 %></div>
+    <div class="stat-card__sub">
+      de <%= resumen.total_juicios || 0 %> registrados
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-card__label">Avance global</div>
+    <div class="stat-card__value"><%= resumen.pct_avance_global || 0 %><span style="font-size:1.2rem;font-weight:400">%</span></div>
+    <div class="stat-card__sub">
+      <%= resumen.por_evaluar || 0 %> por evaluar
+      <% if ((resumen.no_aprobados||0) > 0) { %>
+        · <%= resumen.no_aprobados %> no aprobados
+      <% } %>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Avance por aprendiz ───────────────────────────────────── -->
+<div class="section">
+  <div class="section__header">
+    <h2 class="section__title">Avance por aprendiz</h2>
+    <span class="section__count"><%= avancePorAprendiz.length %> aprendices</span>
+  </div>
+
+  <% if (avancePorAprendiz.length === 0) { %>
+    <div class="card">
+      <p class="text-muted text-sm text-center" style="padding: 2rem 0;">
+        No hay aprendices registrados en esta ficha.
+      </p>
+    </div>
+  <% } else { %>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Aprendiz</th>
+          <th>Estado</th>
+          <th style="min-width:180px">Avance</th>
+          <th class="text-right">Aprobados</th>
+          <th class="text-right">Por evaluar</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% avancePorAprendiz.forEach(a => {
+          const pct = a.pct_avance || 0;
+          const fillClass = pct >= 75 ? '' : pct >= 40 ? 'progress-bar__fill--warn' : 'progress-bar__fill--danger';
+        %>
+        <tr>
+          <td>
+            <div class="fw-600"><%= a.nombre_completo %></div>
+            <div class="td-mono"><%= a.tipo_documento %> <%= a.numero_documento %></div>
+          </td>
+          <td>
+            <%
+              const estadoMap = {
+                'EN FORMACION':     'badge--formacion',
+                'RETIRO VOLUNTARIO':'badge--retiro',
+                'TRASLADADO':       'badge--trasladado',
+                'DESERTADO':        'badge--desertado',
+              };
+              const estadoLabel = {
+                'EN FORMACION':     'En formación',
+                'RETIRO VOLUNTARIO':'Retiro',
+                'TRASLADADO':       'Trasladado',
+                'DESERTADO':        'Desertado',
+              };
+            %>
+            <span class="badge <%= estadoMap[a.estado] || '' %>">
+              <%= estadoLabel[a.estado] || a.estado %>
+            </span>
+          </td>
+          <td>
+            <div class="progress-wrap">
+              <div class="progress-bar">
+                <div class="progress-bar__fill <%= fillClass %>" style="width:<%= pct %>%"></div>
+              </div>
+              <span class="progress-pct"><%= pct %>%</span>
+            </div>
+          </td>
+          <td class="text-right td-mono">
+            <%= a.aprobados || 0 %> / <%= a.total_juicios || 0 %>
+          </td>
+          <td class="text-right">
+            <% if ((a.por_evaluar || 0) > 0) { %>
+              <span class="badge badge--por-evaluar"><%= a.por_evaluar %></span>
+            <% } else { %>
+              <span class="text-muted text-xs">—</span>
+            <% } %>
+          </td>
+          <td class="text-right">
+            <a href="/aprendices/<%= a.id_aprendiz %>" class="btn btn--ghost btn--sm">Ver →</a>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+  <% } %>
+</div>
+
+<!-- ── Aprobación por competencia ────────────────────────────── -->
+<div class="section">
+  <div class="section__header">
+    <h2 class="section__title">Aprobación por competencia</h2>
+    <span class="section__count"><%= aprobacionPorCompetencia.length %> competencias</span>
+  </div>
+
+  <% if (aprobacionPorCompetencia.length === 0) { %>
+    <div class="card">
+      <p class="text-muted text-sm text-center" style="padding: 2rem 0;">
+        No hay datos de competencias para esta ficha.
+      </p>
+    </div>
+  <% } else { %>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Competencia</th>
+          <th style="min-width:160px">Aprobación</th>
+          <th class="text-right">Aprobados</th>
+          <th class="text-right">No aprobados</th>
+          <th class="text-right">Por evaluar</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% aprobacionPorCompetencia.forEach(c => {
+          const pct = c.pct_aprobacion || 0;
+          const fillClass = pct >= 75 ? '' : pct >= 40 ? 'progress-bar__fill--warn' : 'progress-bar__fill--danger';
+          const nombre = c.competencia.length > 60
+            ? c.competencia.substring(0, 60) + '…'
+            : c.competencia;
+        %>
+        <tr>
+          <td class="td-mono"><%= c.codigo_competencia %></td>
+          <td>
+            <span title="<%= c.competencia %>"><%= nombre %></span>
+          </td>
+          <td>
+            <div class="progress-wrap">
+              <div class="progress-bar">
+                <div class="progress-bar__fill <%= fillClass %>" style="width:<%= pct %>%"></div>
+              </div>
+              <span class="progress-pct"><%= pct %>%</span>
+            </div>
+          </td>
+          <td class="text-right td-mono"><%= c.aprobados || 0 %></td>
+          <td class="text-right">
+            <% if ((c.no_aprobados || 0) > 0) { %>
+              <span class="badge badge--no-aprobado"><%= c.no_aprobados %></span>
+            <% } else { %>
+              <span class="text-muted text-xs">—</span>
+            <% } %>
+          </td>
+          <td class="text-right">
+            <% if ((c.por_evaluar || 0) > 0) { %>
+              <span class="badge badge--por-evaluar"><%= c.por_evaluar %></span>
+            <% } else { %>
+              <span class="text-muted text-xs">—</span>
+            <% } %>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+  <% } %>
+</div>
+
+<% } /* fin if resumen */ %>
+
+<%- include('../partials/footer') %>

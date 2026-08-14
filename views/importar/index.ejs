@@ -1,0 +1,206 @@
+<%- include('../partials/header') %>
+<% const currentPage = 'importar'; %>
+<%- include('../partials/nav') %>
+
+<!-- ── Page header ──────────────────────────────────────────── -->
+<div class="page-header">
+  <h1 class="page-header__title">Importar reporte</h1>
+  <p class="page-header__sub">Reporte de Juicios de Evaluación — Sofia Plus</p>
+</div>
+
+<!-- ── Alerta de resultado ───────────────────────────────────── -->
+<% if (tipo === 'exito' && contadores) { %>
+  <div class="alert alert--success">
+    <div class="alert__title">✓ Importación exitosa</div>
+    <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-top:.5rem;">
+      <span><strong><%= contadores.aprendices %></strong> aprendices procesados</span>
+      <span><strong><%= contadores.juicios %></strong> juicios registrados</span>
+      <span><strong><%= contadores.competencias %></strong> competencias</span>
+      <span><strong><%= contadores.resultados %></strong> resultados de aprendizaje</span>
+    </div>
+    <% if (contadores.errores && contadores.errores.length > 0) { %>
+      <details style="margin-top:.75rem;">
+        <summary style="cursor:pointer; font-size:.82rem; font-weight:600; color:#7a5a00;">
+          ⚠ <%= contadores.errores.length %> fila<%= contadores.errores.length !== 1 ? 's' : '' %> con error parcial
+        </summary>
+        <ul class="alert__list" style="margin-top:.5rem; font-size:.8rem; color:#7a5a00;">
+          <% contadores.errores.forEach(e => { %>
+            <li><%= e %></li>
+          <% }) %>
+        </ul>
+      </details>
+    <% } %>
+  </div>
+<% } else if (tipo === 'error') { %>
+  <div class="alert alert--error">
+    <div class="alert__title">✗ Error en la importación</div>
+    <%= mensaje %>
+  </div>
+<% } %>
+
+<!-- ── Layout dos columnas ───────────────────────────────────── -->
+<div style="display:grid; grid-template-columns:1fr 380px; gap:1.5rem; align-items:start;">
+
+  <!-- Columna principal -->
+  <div>
+
+    <!-- Formulario de carga -->
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card__header">
+        <h2 class="card__title">Cargar reporte Excel</h2>
+      </div>
+
+      <form action="/importar" method="POST" enctype="multipart/form-data">
+
+        <!-- Drop zone visual -->
+        <label for="archivo" class="upload-zone">
+          <span class="upload-zone__icon">⊕</span>
+          <span class="upload-zone__title">Selecciona el archivo</span>
+          <span class="upload-zone__sub">Formato .xls o .xlsx · Máximo 10 MB</span>
+          <input
+            type="file"
+            id="archivo"
+            name="archivo"
+            accept=".xls,.xlsx"
+            required
+            class="upload-zone__input"
+            onchange="mostrarNombreArchivo(this)"
+          />
+        </label>
+
+        <p id="nombre-archivo" class="upload-filename" style="display:none;"></p>
+
+        <div style="margin-top:1rem; background:var(--c-surface-2); border:1px solid var(--c-border-soft); border-radius:var(--r-md); padding:.75rem 1rem; font-size:.82rem; color:var(--c-text-2);">
+          <strong>Nota:</strong> Si la ficha ya fue cargada antes, los datos se actualizarán automáticamente.
+          Los aprendices y juicios existentes se sincronizarán con el nuevo reporte.
+        </div>
+
+        <div style="margin-top:1.25rem;">
+          <button type="submit" class="btn btn--accent" style="width:100%; justify-content:center;">
+            ⊕ &nbsp; Cargar reporte
+          </button>
+        </div>
+
+      </form>
+    </div>
+
+    <!-- Fichas cargadas -->
+    <div class="section">
+      <div class="section__header">
+        <h2 class="section__title">Fichas cargadas</h2>
+        <span class="section__count"><%= fichas.length %></span>
+      </div>
+
+      <% if (fichas.length === 0) { %>
+        <div class="card">
+          <div class="empty-state" style="padding:2rem 1rem;">
+            <span class="empty-state__icon" style="font-size:2rem;">▦</span>
+            <h3 class="empty-state__title">Sin fichas importadas</h3>
+            <p class="empty-state__msg">Carga tu primer reporte de Sofia Plus para comenzar.</p>
+          </div>
+        </div>
+      <% } else { %>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ficha</th>
+                <th>Programa</th>
+                <th class="text-right">Aprendices</th>
+                <th>Fecha inicio</th>
+                <th>Fecha fin</th>
+                <th>Última importación</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <% fichas.forEach(f => { %>
+              <tr>
+                <td class="td-mono"><%= f.numero_ficha %></td>
+                <td style="max-width:260px;">
+                  <span title="<%= f.denominacion %>">
+                    <%= f.denominacion.length > 40 ? f.denominacion.substring(0,40)+'…' : f.denominacion %>
+                  </span>
+                  <div class="td-mono" style="margin-top:2px;"><%= f.codigo_programa %></div>
+                </td>
+                <td class="text-right td-mono"><%= f.total_aprendices %></td>
+                <td class="td-mono">
+                  <%= f.fecha_inicio
+                    ? new Date(f.fecha_inicio).toLocaleDateString('es-CO',{day:'2-digit',month:'2-digit',year:'numeric'})
+                    : '—' %>
+                </td>
+                <td class="td-mono">
+                  <%= f.fecha_fin
+                    ? new Date(f.fecha_fin).toLocaleDateString('es-CO',{day:'2-digit',month:'2-digit',year:'numeric'})
+                    : '—' %>
+                </td>
+                <td class="td-mono">
+                  <%= f.ultima_importacion
+                    ? new Date(f.ultima_importacion).toLocaleDateString('es-CO',{day:'2-digit',month:'short',year:'numeric'})
+                    : '—' %>
+                </td>
+                <td class="text-right">
+                  <a href="/?ficha=<%= f.id_ficha %>" class="btn btn--ghost btn--sm">Ver →</a>
+                </td>
+              </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </div>
+
+  </div>
+
+  <!-- Columna lateral: info -->
+  <div>
+    <div class="card card--flat" style="background:var(--c-surface-2); border-color:var(--c-border-soft);">
+      <h3 style="font-size:.9rem; font-weight:700; margin-bottom:1rem; color:var(--c-text-2); text-transform:uppercase; letter-spacing:.06em;">
+        ¿Qué se importa?
+      </h3>
+      <ul style="list-style:none; display:flex; flex-direction:column; gap:.6rem;">
+        <% [
+          ['▦', 'Datos de la ficha', 'Número, programa, fechas, regional, centro de formación'],
+          ['◎', 'Aprendices', 'Documento, nombre, apellidos y estado (en formación, retiro, traslado, deserción)'],
+          ['◈', 'Competencias', 'Código y descripción de cada competencia'],
+          ['⊕', 'Resultados de aprendizaje', 'Código y descripción de cada RA asociado a su competencia'],
+          ['✓', 'Juicios evaluativos', 'Estado del juicio (Aprobado, No aprobado, Por evaluar), fecha, hora y funcionario'],
+        ].forEach(([icon, label, desc]) => { %>
+          <li style="display:flex; gap:.75rem; align-items:flex-start;">
+            <span style="color:var(--c-accent); font-size:1rem; margin-top:1px; flex-shrink:0;"><%= icon %></span>
+            <div>
+              <div style="font-size:.82rem; font-weight:600; color:var(--c-text)"><%= label %></div>
+              <div style="font-size:.78rem; color:var(--c-text-3); margin-top:1px;"><%= desc %></div>
+            </div>
+          </li>
+        <% }) %>
+      </ul>
+
+      <hr style="margin:1.25rem 0; border:none; border-top:1px solid var(--c-border);" />
+
+      <h3 style="font-size:.9rem; font-weight:700; margin-bottom:.75rem; color:var(--c-text-2); text-transform:uppercase; letter-spacing:.06em;">
+        Pasos
+      </h3>
+      <ol style="padding-left:1.25rem; display:flex; flex-direction:column; gap:.5rem; font-size:.82rem; color:var(--c-text-2);">
+        <li>Abre Sofia Plus y exporta el <em>Reporte de Juicios de Evaluación</em></li>
+        <li>Guarda el archivo en formato <strong>.xls</strong> o <strong>.xlsx</strong></li>
+        <li>Selecciónalo en el formulario y pulsa <strong>Cargar reporte</strong></li>
+        <li>El sistema procesará e importará todos los datos automáticamente</li>
+      </ol>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Script mínimo para nombre de archivo ──────────────────── -->
+<script>
+  function mostrarNombreArchivo(input) {
+    const p = document.getElementById('nombre-archivo');
+    if (input.files && input.files[0]) {
+      p.textContent = '📄 ' + input.files[0].name;
+      p.style.display = 'block';
+    }
+  }
+</script>
+
+<%- include('../partials/footer') %>
