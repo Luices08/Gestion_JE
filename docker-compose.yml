@@ -1,0 +1,15 @@
+services:
+  gestion-juicios:
+    build: .
+    container_name: gestion-juicios
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    networks:
+      - infrastructure
+
+networks:
+  infrastructure:
+    external: true
