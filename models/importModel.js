@@ -3,28 +3,59 @@ const fs   = require('fs');
 const pool = require('../config/db');
 
 // =============================================================
-//  HELPERS DE PARSEO
+//  HELPERS DE NORMALIZACIÓN Y PARSEO
 // =============================================================
+
+/**
+ * Normaliza un texto para comparaciones flexibles:
+ * quita acentos/tildes, convierte a minúsculas, colapsa espacios y saltos de línea.
+ */
+function normalizarTexto(txt) {
+  return String(txt ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 /**
  * Extrae { codigo, descripcion } de una celda con formato
  * "36180 - Descripción..." o "2 - Descripción...".
- * No asume longitud mínima del código.
+ * Asegura que el código no exceda los 20 caracteres del esquema de BD.
  */
 function parsearCodigoDescripcion(celda) {
   if (!celda) return null;
   const texto = String(celda).trim();
-  const idx   = texto.indexOf(' - ');
-  if (idx === -1) return { codigo: texto, descripcion: texto };
+  if (!texto) return null;
+
+  const idx = texto.indexOf(' - ');
+  if (idx !== -1) {
+    return {
+      codigo:      texto.substring(0, idx).trim().substring(0, 20),
+      descripcion: texto.substring(idx + 3).trim(),
+    };
+  }
+
+  // Si tiene formato "123456 - ..." o "123456: ..."
+  const match = texto.match(/^([A-Za-z0-9_-]+)\s*[-:]\s*(.*)$/);
+  if (match) {
+    return {
+      codigo:      match[1].trim().substring(0, 20),
+      descripcion: match[2].trim() || texto,
+    };
+  }
+
   return {
-    codigo:      texto.substring(0, idx).trim(),
-    descripcion: texto.substring(idx + 3).trim(),
+    codigo:      texto.substring(0, 20),
+    descripcion: texto,
   };
 }
 
 /**
  * Extrae { tipo_documento, numero_documento, nombre_completo }
- * de una celda con formato "CC 1117523028 - NOMBRE APELLIDO".
+ * de una celda con formato "CC 1117523028 - NOMBRE APELLIDO" o similar.
  *
  * Retorna null cuando la celda está vacía, es null, o contiene
  * solo espacios y guiones (ej: "  -   "), que es como Sofia Plus
@@ -35,34 +66,41 @@ function parsearFuncionario(celda) {
 
   const texto = String(celda).trim();
 
-  // Detectar el patrón vacío "  -   " → solo espacios y guiones
-  if (/^[\s\-]+$/.test(texto)) return null;
+  // Detectar patrón vacío "  -   " → solo espacios y guiones
+  if (!texto || /^[\s\-]+$/.test(texto)) return null;
 
   // Formato esperado: "CC 1117523028 - NOMBRE APELLIDO"
   const idx = texto.indexOf(' - ');
   if (idx === -1) return null;
 
-  const parteIzq  = texto.substring(0, idx).trim();   // "CC 1117523028"
-  const nombre    = texto.substring(idx + 3).trim();   // "NOMBRE APELLIDO"
+  const parteIzq = texto.substring(0, idx).trim();
+  const nombre   = texto.substring(idx + 3).trim();
 
   if (!nombre) return null;
 
-  const espacioDoc = parteIzq.indexOf(' ');
-  if (espacioDoc === -1) return null;
+  const partesDoc = parteIzq.split(/\s+/);
+  let tipo_documento   = 'CC';
+  let numero_documento = parteIzq;
 
-  const tipo_documento    = parteIzq.substring(0, espacioDoc).trim();
-  const numero_documento  = parteIzq.substring(espacioDoc + 1).trim();
+  if (partesDoc.length >= 2) {
+    tipo_documento   = partesDoc[0].substring(0, 5).toUpperCase();
+    numero_documento = partesDoc.slice(1).join('').trim();
+  }
 
-  if (!tipo_documento || !numero_documento) return null;
+  if (!numero_documento) return null;
 
-  return { tipo_documento, numero_documento, nombre_completo: nombre };
+  return {
+    tipo_documento,
+    numero_documento: numero_documento.substring(0, 20),
+    nombre_completo:  nombre.substring(0, 160),
+  };
 }
 
 /**
  * Convierte un serial numérico de Excel a objeto Date JS.
  * Los archivos .xls de Sofia Plus almacenan fechas como número de días
  * desde 1900-01-01 (con el bug de 1900 leap year de Lotus 123).
- * Fórmula: (serial - 25569) * 86400 * 1000 → ms desde epoch Unix.
+ * Fórmula: (serial - 25569) * 86400 * 1000 → ms desde epoch Unix UTC.
  */
 function serialExcelADate(serial) {
   if (!serial || typeof serial !== 'number') return null;
@@ -71,12 +109,28 @@ function serialExcelADate(serial) {
 
 /**
  * Convierte cualquier valor de celda de fecha a Date JS.
- * Acepta: serial numérico, objeto Date, o string parseable.
+ * Acepta: serial numérico, objeto Date, o string parseable (incluyendo DD/MM/YYYY [HH:MM[:SS]]).
  */
 function parsearFecha(valor) {
   if (!valor) return null;
   if (valor instanceof Date) return isNaN(valor.getTime()) ? null : valor;
   if (typeof valor === 'number') return serialExcelADate(valor);
+
+  const str = String(valor).trim();
+  // Formato colombiano habitual en Sofia Plus: DD/MM/YYYY o DD-MM-YYYY con opcional HH:MM:SS
+  const match = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (match) {
+    const dia = parseInt(match[1], 10);
+    const mes = parseInt(match[2], 10) - 1;
+    let anio  = parseInt(match[3], 10);
+    if (anio < 100) anio += 2000;
+    const hora = match[4] ? parseInt(match[4], 10) : 0;
+    const min  = match[5] ? parseInt(match[5], 10) : 0;
+    const seg  = match[6] ? parseInt(match[6], 10) : 0;
+    const d    = new Date(Date.UTC(anio, mes, dia, hora, min, seg));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
   const d = new Date(valor);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -87,7 +141,6 @@ function parsearFecha(valor) {
 function formatearFechaSQL(valor) {
   const d = parsearFecha(valor);
   if (!d) return null;
-  // Usar UTC para evitar desplazamientos por zona horaria
   const y  = d.getUTCFullYear();
   const m  = String(d.getUTCMonth() + 1).padStart(2, '0');
   const dy = String(d.getUTCDate()).padStart(2, '0');
@@ -107,6 +160,35 @@ function formatearDatetimeSQL(valor) {
   const mi = String(d.getUTCMinutes()).padStart(2, '0');
   const s  = String(d.getUTCSeconds()).padStart(2, '0');
   return `${y}-${mo}-${dy} ${h}:${mi}:${s}`;
+}
+
+/**
+ * Normaliza el juicio evaluativo para que cumpla el CHECK de la base de datos:
+ * 'APROBADO', 'NO APROBADO', 'POR EVALUAR'
+ */
+function normalizarJuicio(valor) {
+  if (!valor) return 'POR EVALUAR';
+  const v = normalizarTexto(valor).toUpperCase();
+  if (v.includes('NO APROB') || v.includes('DEFICIENTE') || v === 'D' || v === 'NA') {
+    return 'NO APROBADO';
+  }
+  if (v.includes('APROB') || v === 'A') {
+    return 'APROBADO';
+  }
+  return 'POR EVALUAR';
+}
+
+/**
+ * Normaliza el estado del aprendiz para cumplir con el CHECK de Postgres:
+ * 'EN FORMACION', 'RETIRO VOLUNTARIO', 'TRASLADADO', 'DESERTADO'
+ */
+function normalizarEstadoAprendiz(estadoRaw) {
+  if (!estadoRaw) return 'EN FORMACION';
+  const norm = normalizarTexto(estadoRaw).toUpperCase();
+  if (norm.includes('RETIRO')) return 'RETIRO VOLUNTARIO';
+  if (norm.includes('TRASLAD')) return 'TRASLADADO';
+  if (norm.includes('DESERT')) return 'DESERTADO';
+  return 'EN FORMACION';
 }
 
 // =============================================================
@@ -189,7 +271,7 @@ async function upsertResultado(conn, idCompetencia, codigo, descripcion) {
 }
 
 async function upsertFuncionario(conn, datos) {
-  // datos puede ser null cuando el Excel trae "  -   "
+  // datos puede ser null cuando el Excel trae "  -   " o no tiene funcionario
   if (!datos) return null;
 
   const { rows } = await conn.query(
@@ -250,7 +332,7 @@ async function upsertJuicio(conn, idAprendiz, idResultado, idFuncionario, idFich
 // =============================================================
 
 /**
- * Importa un archivo .xls / .xlsx del SENA a PostgreSQL.
+ * Importa un archivo .xls / .xlsx del SENA a PostgreSQL de forma tolerante y flexible.
  * @param {string} rutaArchivo  Ruta absoluta al archivo temporal
  * @returns {{ fichaId, aprendices, competencias, resultados, juicios, errores[] }}
  */
@@ -261,48 +343,96 @@ async function importarExcel(rutaArchivo) {
   const ws     = wb.Sheets[wb.SheetNames[0]];
   const filas  = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
-  // ── Extraer metadatos de la ficha (filas 0-11) ─────────────
+  // ── 1. Detectar dinámicamente la fila de encabezados ────────
+  // Normalmente fila 13 (índice 12), pero puede variar según la exportación.
+  let headerRowIndex = 12;
+  for (let r = 0; r < Math.min(filas.length, 30); r++) {
+    const filaNorm = (filas[r] || []).map(normalizarTexto);
+    const matches = filaNorm.filter(c =>
+      c.includes('documento') ||
+      c.includes('competencia') ||
+      c.includes('resultado') ||
+      c.includes('juicio')
+    ).length;
+
+    if (matches >= 2) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  // ── 2. Extraer metadatos de la ficha (filas anteriores al encabezado) ─
+  function buscarMetadato(patrones, valorPorDefecto = '') {
+    for (let r = 0; r < headerRowIndex; r++) {
+      const fila = filas[r] || [];
+      for (let c = 0; c < fila.length; c++) {
+        const celda = normalizarTexto(fila[c]);
+        if (patrones.some(p => celda.includes(p))) {
+          // El valor suele estar en la siguiente celda con contenido de esa fila
+          for (let v = c + 1; v < fila.length; v++) {
+            if (fila[v] !== null && fila[v] !== undefined && String(fila[v]).trim() !== '') {
+              return fila[v];
+            }
+          }
+        }
+      }
+    }
+    return valorPorDefecto;
+  }
+
   const meta = {
-    numero_ficha:     String(filas[2]?.[2] ?? '').trim(),
-    codigo_programa:  String(filas[3]?.[2] ?? '').trim(),
-    version:          Number(filas[4]?.[2] ?? 1),
-    denominacion:     String(filas[5]?.[2] ?? '').trim(),
-    estado_ficha:     String(filas[6]?.[2] ?? 'EN EJECUCION').trim(),
-    fecha_inicio:     formatearFechaSQL(filas[7]?.[2]),
-    fecha_fin:        formatearFechaSQL(filas[8]?.[2]),
-    modalidad:        String(filas[9]?.[2] ?? 'PRESENCIAL').trim(),
-    regional:         String(filas[10]?.[2] ?? '').trim(),
-    centro_formacion: String(filas[11]?.[2] ?? '').trim(),
+    numero_ficha:     String(buscarMetadato(['ficha', 'caracterizacion'], filas[2]?.[2] ?? '')).trim(),
+    codigo_programa:  String(buscarMetadato(['codigo', 'programa'], filas[3]?.[2] ?? '')).trim(),
+    version:          Number(buscarMetadato(['version'], filas[4]?.[2] ?? 1)) || 1,
+    denominacion:     String(buscarMetadato(['denominacion', 'nombre del programa'], filas[5]?.[2] ?? '')).trim(),
+    estado_ficha:     String(buscarMetadato(['estado de la ficha', 'estado ficha'], filas[6]?.[2] ?? 'EN EJECUCION')).trim(),
+    fecha_inicio:     formatearFechaSQL(buscarMetadato(['fecha inicio', 'inicio'], filas[7]?.[2])),
+    fecha_fin:        formatearFechaSQL(buscarMetadato(['fecha fin', 'fin'], filas[8]?.[2])),
+    modalidad:        String(buscarMetadato(['modalidad'], filas[9]?.[2] ?? 'PRESENCIAL')).trim() || 'PRESENCIAL',
+    regional:         String(buscarMetadato(['regional'], filas[10]?.[2] ?? '')).trim(),
+    centro_formacion: String(buscarMetadato(['centro de formacion', 'centro formacion', 'centro'], filas[11]?.[2] ?? '')).trim(),
   };
 
   if (!meta.numero_ficha) {
-    throw new Error('El archivo no contiene un número de ficha válido (fila 3, columna C).');
+    throw new Error('El archivo no contiene un número de ficha válido en la cabecera del reporte.');
   }
 
-  // ── Detectar layout de columnas desde la fila de encabezados ─
-  // Sofia Plus a veces exporta una columna vacía extra entre
-  // "Juicio de Evaluación" y "Fecha y Hora del Juicio".
-  // Detectamos las posiciones reales por nombre de encabezado.
-  const headers = (filas[12] || []).map(h => String(h ?? '').trim().toLowerCase());
+  // ── 3. Detectar layout de columnas desde la fila de encabezados ─
+  const rawHeaders = filas[headerRowIndex] || [];
+  const headers = rawHeaders.map(normalizarTexto);
+
   const COL = {
-    tipo_doc:     headers.findIndex(h => h.includes('tipo de documento')),
-    num_doc:      headers.findIndex(h => h.includes('número de documento')),
-    nombres:      headers.findIndex(h => h === 'nombre'),
-    apellidos:    headers.findIndex(h => h === 'apellidos'),
-    estado:       headers.findIndex(h => h === 'estado'),
-    competencia:  headers.findIndex(h => h.includes('competencia')),
-    resultado:    headers.findIndex(h => h.includes('resultado de aprendizaje')),
-    juicio:       headers.findIndex(h => h.includes('juicio de evaluación') || h.includes('juicio de evaluacion')),
-    fecha:        headers.findIndex(h => h.includes('fecha y hora')),
-    funcionario:  headers.findIndex(h => h.includes('funcionario')),
+    tipo_doc:    headers.findIndex(h => (h.includes('tipo') && (h.includes('doc') || h.includes('identifica'))) || h === 'td'),
+    num_doc:     headers.findIndex(h =>
+      ((h.includes('numero') || h.includes('num') || h.includes('nro')) && (h.includes('doc') || h.includes('identifica'))) ||
+      (h.includes('documento') && !h.includes('tipo')) ||
+      h.includes('identificacion') ||
+      h.includes('cedula')
+    ),
+    nombres:     headers.findIndex(h => (h.includes('nombre') && !h.includes('funcionario') && !h.includes('completo') && !h.includes('programa')) || h === 'nombre' || h === 'nombres'),
+    apellidos:   headers.findIndex(h => h.includes('apellido')),
+    estado:      headers.findIndex(h => (h.includes('estado') && !h.includes('ficha') && !h.includes('juicio')) || h === 'estado'),
+    competencia: headers.findIndex(h => h.includes('competencia')),
+    resultado:   headers.findIndex(h => h.includes('resultado') || h.includes('aprendizaje') || h.includes('rap')),
+    juicio:      headers.findIndex(h => h.includes('juicio') || (h.includes('evaluacion') && !h.includes('fecha') && !h.includes('funcionario') && !h.includes('centro'))),
+    fecha:       headers.findIndex(h => h.includes('fecha') || h.includes('hora')),
+    funcionario: headers.findIndex(h => h.includes('funcionario') || h.includes('instructor') || h.includes('evaluador') || h.includes('docente') || h.includes('responsable')),
   };
 
-  // Validar que encontramos las columnas mínimas
-  const colsFaltantes = Object.entries(COL)
-    .filter(([, v]) => v === -1)
-    .map(([k]) => k);
+  // Validar ÚNICAMENTE las columnas mínimas indispensables para registrar los juicios
+  const colsObligatorias = [
+    { key: 'num_doc',     label: 'Número de documento' },
+    { key: 'competencia', label: 'Competencia' },
+    { key: 'resultado',   label: 'Resultado de aprendizaje' },
+    { key: 'juicio',      label: 'Juicio de evaluación' },
+  ];
+
+  const colsFaltantes = colsObligatorias
+    .filter(c => COL[c.key] === -1)
+    .map(c => c.label);
+
   if (colsFaltantes.length > 0) {
-    throw new Error(`No se encontraron las columnas: ${colsFaltantes.join(', ')}. Verifica que el archivo sea un Reporte de Juicios de Evaluación de Sofia Plus.`);
+    throw new Error(`No se encontraron las columnas requeridas: ${colsFaltantes.join(', ')}. Verifica que el archivo sea un Reporte de Juicios de Evaluación de Sofia Plus.`);
   }
 
   // ── Contadores ─────────────────────────────────────────────
@@ -327,37 +457,38 @@ async function importarExcel(rutaArchivo) {
     // 1. Upsert ficha
     contadores.fichaId = await upsertFicha(conn, meta);
 
-    // 2. Procesar filas de datos (desde la fila 13, índice 13)
-    const filaDatos = filas.slice(13);
+    // 2. Procesar filas de datos (a partir de la fila siguiente al encabezado)
+    const filaDatos = filas.slice(headerRowIndex + 1);
 
     for (let i = 0; i < filaDatos.length; i++) {
       const fila = filaDatos[i];
 
       // Saltar filas completamente vacías
-      if (!fila || fila.every(c => c === null || c === '')) continue;
+      if (!fila || fila.every(c => c === null || c === '' || c === undefined)) continue;
 
       try {
-        const tipo_documento   = fila[COL.tipo_doc];
-        const numero_documento = fila[COL.num_doc];
-        const nombres          = fila[COL.nombres];
-        const apellidos        = fila[COL.apellidos];
-        const estado           = fila[COL.estado];
-        const celdaCompetencia = fila[COL.competencia];
-        const celdaResultado   = fila[COL.resultado];
-        const juicio           = fila[COL.juicio];
-        const celdaFecha       = fila[COL.fecha];
-        const celdaFuncionario = fila[COL.funcionario];
+        const tipo_documento   = COL.tipo_doc !== -1 && fila[COL.tipo_doc] ? fila[COL.tipo_doc] : 'CC';
+        const numero_documento = COL.num_doc !== -1 ? fila[COL.num_doc] : null;
+        const nombres          = COL.nombres !== -1 ? fila[COL.nombres] : '';
+        const apellidos        = COL.apellidos !== -1 ? fila[COL.apellidos] : '';
+        const estadoRaw        = COL.estado !== -1 ? fila[COL.estado] : 'EN FORMACION';
+        const celdaCompetencia = COL.competencia !== -1 ? fila[COL.competencia] : null;
+        const celdaResultado   = COL.resultado !== -1 ? fila[COL.resultado] : null;
+        const juicioRaw        = COL.juicio !== -1 ? fila[COL.juicio] : null;
+        const celdaFecha       = COL.fecha !== -1 ? fila[COL.fecha] : null;
+        const celdaFuncionario = COL.funcionario !== -1 ? fila[COL.funcionario] : null;
 
-        // Validaciones mínimas
-        if (!numero_documento || !juicio) {
-          contadores.errores.push(`Fila ${i + 14}: faltan campos obligatorios (doc o juicio)`);
+        const numDoc = numero_documento != null ? String(numero_documento).trim() : '';
+
+        // Si no tiene número de documento, omitir la fila
+        if (!numDoc) {
           continue;
         }
 
         // ── Competencia ──────────────────────────────────────
         const comp = parsearCodigoDescripcion(celdaCompetencia);
         if (!comp) {
-          contadores.errores.push(`Fila ${i + 14}: competencia inválida → ${celdaCompetencia}`);
+          contadores.errores.push(`Fila ${i + headerRowIndex + 2}: competencia inválida → ${celdaCompetencia}`);
           continue;
         }
         const idCompetencia = await upsertCompetencia(conn, comp.codigo, comp.descripcion);
@@ -369,7 +500,7 @@ async function importarExcel(rutaArchivo) {
         // ── Resultado de aprendizaje ─────────────────────────
         const ra = parsearCodigoDescripcion(celdaResultado);
         if (!ra) {
-          contadores.errores.push(`Fila ${i + 14}: resultado de aprendizaje inválido → ${celdaResultado}`);
+          contadores.errores.push(`Fila ${i + headerRowIndex + 2}: resultado de aprendizaje inválido → ${celdaResultado}`);
           continue;
         }
         const idResultado = await upsertResultado(conn, idCompetencia, ra.codigo, ra.descripcion);
@@ -383,13 +514,12 @@ async function importarExcel(rutaArchivo) {
         const idFuncionario    = await upsertFuncionario(conn, datosFuncionario);
 
         // ── Aprendiz ─────────────────────────────────────────
-        const numDoc = String(numero_documento).trim();
         const idAprendiz = await upsertAprendiz(conn, contadores.fichaId, {
-          tipo_documento:   String(tipo_documento ?? '').trim(),
+          tipo_documento:   String(tipo_documento ?? 'CC').trim().substring(0, 5),
           numero_documento: numDoc,
           nombres:          String(nombres   ?? '').trim(),
           apellidos:        String(apellidos ?? '').trim(),
-          estado:           String(estado    ?? 'EN FORMACION').trim(),
+          estado:           normalizarEstadoAprendiz(estadoRaw),
         });
         if (!aprendicesVistos.has(numDoc)) {
           aprendicesVistos.add(numDoc);
@@ -397,15 +527,16 @@ async function importarExcel(rutaArchivo) {
         }
 
         // ── Juicio evaluativo ────────────────────────────────
-        const fechaHora = formatearDatetimeSQL(celdaFecha);
+        const juicioVal = normalizarJuicio(juicioRaw);
+        const fechaHora = celdaFecha ? formatearDatetimeSQL(celdaFecha) : null;
         await upsertJuicio(
           conn, idAprendiz, idResultado, idFuncionario,
-          contadores.fichaId, String(juicio).trim(), fechaHora
+          contadores.fichaId, juicioVal, fechaHora
         );
         contadores.juicios++;
 
       } catch (errFila) {
-        contadores.errores.push(`Fila ${i + 14}: ${errFila.message}`);
+        contadores.errores.push(`Fila ${i + headerRowIndex + 2}: ${errFila.message}`);
       }
     }
 
